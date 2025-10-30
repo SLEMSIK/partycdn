@@ -3,125 +3,87 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
-// Middleware для логирования запросов
+// Middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl} - Host: ${req.get('host')}`);
     next();
 });
 
-// Настройка статической раздачи файлов из папки images
-app.use('/cdn', express.static(path.join(__dirname, 'images'), {
-    maxAge: '1d',
+// CORS
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    next();
+});
+
+// Статическая раздача
+app.use('/', express.static(path.join(__dirname, 'images'), {
+    maxAge: '365d',
     etag: true,
     lastModified: true,
-    index: false // Отключаем индексные файлы
+    index: false
 }));
 
-// Обработчик для проверки существования изображения
-app.get('/cdn/:imageName', (req, res, next) => {
+// Проверка существования изображения
+app.get('/:imageName', (req, res, next) => {
     const imageName = req.params.imageName;
     
-    // Защита от path traversal атак
+    if (imageName === '' || imageName === 'cdn-list') return next();
+    
     if (imageName.includes('..') || imageName.includes('/') || imageName.includes('\\')) {
-        return res.status(400).json({
-            error: 'Invalid image name',
-            message: 'Image name contains invalid characters'
-        });
+        return res.status(400).json({ error: 'Invalid image name' });
     }
     
     const imagePath = path.join(__dirname, 'images', imageName);
-    
-    // Проверяем существование файла
     fs.access(imagePath, fs.constants.F_OK, (err) => {
-        if (err) {
-            return res.status(404).json({
-                error: 'Image not found',
-                message: `Image '${imageName}' does not exist`
-            });
-        }
-        // Если файл существует, передаем управление статическому middleware
+        if (err) return res.status(404).json({ error: 'Image not found' });
         next();
     });
 });
 
-// Маршрут для получения списка всех изображений
+// Список изображений
 app.get('/cdn-list', (req, res) => {
     const imagesDir = path.join(__dirname, 'images');
     
     fs.readdir(imagesDir, (err, files) => {
-        if (err) {
-            return res.status(500).json({
-                error: 'Server error',
-                message: 'Could not read images directory'
-            });
-        }
+        if (err) return res.status(500).json({ error: 'Server error' });
         
         const imageFiles = files.filter(file => 
-            /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(file)
+            /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico)$/i.test(file)
         );
         
-        // Создаем полные URL для каждого изображения
-        const baseUrl = `${req.protocol}://${req.get('host')}/cdn`;
         const imagesWithUrls = imageFiles.map(file => ({
             name: file,
-            url: `${baseUrl}/${file}`
+            url: `https://cdn.partylight33.ru/${file}`,
+            size: fs.statSync(path.join(imagesDir, file)).size
         }));
         
         res.json({
+            server: 'cdn.partylight33.ru',
             images: imagesWithUrls,
             count: imageFiles.length
         });
     });
 });
 
-// Базовый маршрут для проверки работы сервера
+// Главная страница
 app.get('/', (req, res) => {
     res.json({
-        message: 'CDN Server is running',
+        message: 'CDN Server is running on cdn.partylight33.ru',
         endpoints: {
-            getImage: 'GET /cdn/:imageName',
-            listImages: 'GET /cdn-list',
-            example: `http://localhost:${PORT}/cdn/your-image.jpg`
-        }
-    });
-});
-
-// Обработчик 404 - исправленная версия
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Route not found',
-        message: `Route ${req.originalUrl} does not exist`,
-        availableRoutes: {
-            home: 'GET /',
-            getImage: 'GET /cdn/:imageName',
+            getImage: 'GET /:imageName',
             listImages: 'GET /cdn-list'
         }
     });
 });
 
-// Обработчик ошибок
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).json({
-        error: 'Internal server error',
-        message: 'Something went wrong on the server'
-    });
-});
-
 // Запуск сервера
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 CDN server running on port ${PORT}`);
-    console.log(`📸 Access images: http://localhost:${PORT}/cdn/image_name`);
-    console.log(`📋 List images: http://localhost:${PORT}/cdn-list`);
-    
-    // Проверяем существование папки images
-    const imagesDir = path.join(__dirname, 'images');
-    if (!fs.existsSync(imagesDir)) {
-        console.log('📁 Creating images directory...');
-        fs.mkdirSync(imagesDir, { recursive: true });
-    }
+    console.log(`🌐 Access via: https://cdn.partylight33.ru`);
 });
 
 module.exports = app;
